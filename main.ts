@@ -29,6 +29,30 @@ if (!isPng && !isJpeg) {
   process.exit(1);
 }
 
+// The gate also caps the picture at 1024 by 1024 pixels, so read the dimensions out of the
+// header and enforce that too: PNG stores them big-endian in the IHDR chunk, JPEG in the
+// first start-of-frame segment.
+function dimensions(buf: Buffer): { width: number; height: number } {
+  if (buf.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  let off = 2;
+  while (off + 9 < buf.length) {
+    if (buf[off] !== 0xff) break;
+    const marker = buf[off + 1];
+    if (marker >= 0xc0 && marker <= 0xc3) {
+      return { height: buf.readUInt16BE(off + 5), width: buf.readUInt16BE(off + 7) };
+    }
+    off += 2 + buf.readUInt16BE(off + 2);
+  }
+  throw new Error('could not read JPEG dimensions');
+}
+const { width, height } = dimensions(image);
+if (width > 1024 || height > 1024) {
+  console.error(`entry.png is ${width}x${height}, over the 1024x1024 limit`);
+  process.exit(1);
+}
+
 const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 mkdirSync(outDir, { recursive: true });
 copyFileSync(here, join(outDir, 'entry.png'));
